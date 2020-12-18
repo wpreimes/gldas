@@ -40,8 +40,8 @@ jobs:
         shell: bash -l {0}
         run: |
           python setup.py test
-      - name: Coveralls Parallel
-        uses: coverallsapp/github-action@v1.1.2
+      - name: Coveralls Python
+        uses: AndreMiras/coveralls-python-action@v20201129
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           flag-name: run-${{ matrix.python-version }}
@@ -50,8 +50,8 @@ jobs:
     needs: test-linux-python
     runs-on: ubuntu-latest
     steps:
-    - name: Coveralls Finished
-      uses: coverallsapp/github-action@v1.1.2
+    - name: Coveralls Python
+      uses: AndreMiras/coveralls-python-action@v20201129
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         parallel-finished: true          
