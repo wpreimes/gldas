@@ -1,0 +1,54 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Linux Installation and Testing
+
+on: [push, pull_request]
+
+jobs:
+  gldas-linux-python:
+    runs-on: "ubuntu-latest"
+    strategy:
+      matrix:
+        python-version: ['3.6', '3.7']
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - uses: conda-incubator/setup-miniconda@v2.0.1
+        with:
+          miniconda-version: "latest"
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
+          environment-file: environment.yml
+          activate-environment: gldas
+          auto-activate-base: false
+      - name: Print environment infos
+        shell: bash -l {0}
+        run: |
+          conda info -a
+          conda list
+          pip list
+          which pip
+          which python
+      - name: Install package
+        shell: bash -l {0}
+        run: |
+          python setup.py install
+      - name: Run setup.py test
+        shell: bash -l {0}
+        run: |
+          python setup.py test
+#     - name: Send coverage report
+#        if: ${{ success() }}
+#        run: |
+#          pip install coveralls
+#          coveralls
+#     - name: Build and publish
+#          env:
+#            TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+#            TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+#          run: |
+#            python setup.py sdist bdist_wheel
+#            twine upload dist/*
