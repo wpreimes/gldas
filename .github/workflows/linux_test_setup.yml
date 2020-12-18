@@ -41,8 +41,10 @@ jobs:
         run: |
           python setup.py test
       - name: Upload Coverage
+        shell: bash -l {0}
         run: |
-          pip3 install --upgrade coveralls
+          conda list
+          pip install coveralls
           coveralls
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
