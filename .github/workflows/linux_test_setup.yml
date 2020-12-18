@@ -57,9 +57,8 @@ jobs:
     container: python:3-slim
     steps:
     - name: Finished
-      shell: bash -l {0}
       run: |
-        pip install coveralls
+        pip3 install --upgrade coveralls
         coveralls --finish
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
