@@ -48,7 +48,7 @@ jobs:
           COVERALLS_PARALLEL: true
   coveralls:
     name: Finish Coveralls
-    needs: test
+    needs: test-linux-python
     runs-on: ubuntu-latest
     steps:
     - name: Finished
