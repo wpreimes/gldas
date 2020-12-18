@@ -78,7 +78,7 @@ jobs:
           body_path: ./CHANGELOG.rst
           draft: false
           prerelease: false
-  deploy:
+  publish:
     name: Upload to Pypi 🚀
     needs: release
     runs-on: ubuntu-latest
@@ -92,7 +92,7 @@ jobs:
           python setup.py sdist # bdist_wheel
       - name: Publish distribution to Test PyPI
         # if: startsWith(github.ref, 'refs/tags') # todo: add for safety for real pypi
-        uses: pypa/gh-action-pypi-publish@v1
+        uses: pypa/gh-action-pypi-publish@v1.4.1
         with:
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }} # change token for real pypi
-          repository_url: https://test.pypi.org/legacy/ # drop line to publish to real pyp
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }} # todo: change token for real pypi
+          repository_url: https://test.pypi.org/legacy/ # todo: drop line to publish to real pyp
