@@ -40,21 +40,23 @@ jobs:
         shell: bash -l {0}
         run: |
           python setup.py test
-      - name: Coveralls Python
-        uses: AndreMiras/coveralls-python-action@v20201129
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          flag-name: run-${{ matrix.python-version }}
-          parallel: true
-  finish:
-    needs: test-linux-python
+      - name: Upload Coverage
+        run: coveralls
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COVERALLS_FLAG_NAME: ${{ matrix.python-version }}
+          COVERALLS_PARALLEL: true
+  coveralls:
+    name: Finish Coveralls
+    needs: test
     runs-on: ubuntu-latest
     steps:
-    - name: Coveralls Python
-      uses: AndreMiras/coveralls-python-action@v20201129
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        parallel-finished: true          
+    - name: Finished
+      run: |
+        pip3 install --upgrade coveralls
+        coveralls --finish
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 #     - name: Build and publish
 #          env:
