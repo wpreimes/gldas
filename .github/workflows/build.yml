@@ -1,12 +1,13 @@
 # This workflow will install Python dependencies, run tests and lint with a variety of Python versions
 # For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
 
-name: Linux Installation and Testing 🐍
+name: Linux Build, Test, Release Python Packge
 
 on: [push, pull_request]
 
 jobs:
-  test-linux-python:
+  build:
+    name: Install and Test 🐍
     runs-on: "ubuntu-latest"
     strategy:
       matrix:
@@ -49,8 +50,8 @@ jobs:
           COVERALLS_FLAG_NAME: ${{ matrix.python-version }}
           COVERALLS_PARALLEL: true
   coveralls:
-    name: Finish Coveralls
-    needs: test-linux-python
+    name: Submit Coveralls 👚
+    needs: build
     runs-on: ubuntu-latest
     container: python:3-slim
     steps:
@@ -59,3 +60,38 @@ jobs:
         pip3 install --upgrade coveralls && coveralls --finish
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  release:
+    name: Create Package Release 📦
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Create Release
+        # id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body_path: ./CHANGELOG.rst
+          draft: false
+          prerelease: false
+  deploy:
+    name: Upload to Pypi 🚀
+    needs: release
+    runs-on: ubuntu-latest
+    container: python:3-slim
+    steps:
+      - uses: actions/checkout@v2
+        run: |
+          python -m pip install --upgrade pip
+          pip install setuptools wheel twine
+          python setup.py sdist # bdist_wheel
+      - name: Publish distribution to Test PyPI
+        # if: startsWith(github.ref, 'refs/tags') # todo: add for safety for real pypi
+        uses: pypa/gh-action-pypi-publish@v1
+        with:
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }} # change token for real pypi
+          repository_url: https://test.pypi.org/legacy/ # drop line to publish to real pyp
