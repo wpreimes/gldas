@@ -54,8 +54,10 @@ jobs:
     name: Finish Coveralls
     needs: test-linux-python
     runs-on: ubuntu-latest
+    container: python:3-slim
     steps:
     - name: Finished
+      shell: bash -l {0}
       run: |
         pip install coveralls
         coveralls --finish
