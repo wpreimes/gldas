@@ -57,7 +57,7 @@ jobs:
     steps:
     - name: Finished
       run: |
-        pip3 install --upgrade coveralls
+        pip install coveralls
         coveralls --finish
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
