@@ -1,0 +1,68 @@
+name: Upload Python Package
+
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+    #tags:
+    #  - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body_path: ./CHANGELOG.rst
+          draft: false
+          prerelease: false
+  deploy:
+    needs: release
+    runs-on: ubuntu-latest
+    container: python:3-slim
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip
+          pip install setuptools wheel twine
+          python setup.py sdist # bdist_wheel
+      - name: Publish distribution to Test PyPI
+        # if: startsWith(github.ref, 'refs/tags') # todo: add for safety for real pypi
+        uses: pypa/gh-action-pypi-publish@v1
+        with:
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }} # change token for real pypi
+          repository_url: https://test.pypi.org/legacy/ # drop line to publish to real pypi
+
+#      - name: Build and publish
+#        env:
+#          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+#          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+#        run: |
+#          python setup.py sdist bdist_wheel
+#          twine upload dist/*
+#
+#
+#  pypi:
+#    name: Release to pypi
+#    steps:
+#      - uses: actions/checkout@v2
+#      - name: Set up Python 3.7
+#        uses: actions/setup-python@v1
+#        with:
+#          python-version: 3.7
+##     - name: Build and publish
+##          env:
+##            TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+##            TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+##          run: |
+##            python setup.py sdist bdist_wheel
+##            twine upload dist/*
