@@ -40,11 +40,11 @@ jobs:
         shell: bash -l {0}
         run: |
           python setup.py test
-#     - name: Send coverage report
-#        if: ${{ success() }}
-#        run: |
-#          pip install coveralls
-#          coveralls
+      - name: Send coverage report
+        if: ${{ success() }}
+        run: |
+          pip install coveralls
+          coveralls
 #     - name: Build and publish
 #          env:
 #            TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
