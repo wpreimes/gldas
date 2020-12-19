@@ -62,7 +62,8 @@ jobs:
         shell: bash -l {0}
         run: |
           python setup.py --version
-          python setup.py sdist bdist_wheel
+          python setup.py sdist
+          python setup.py bdist_wheel
       - name: Publish distribution to Test PyPI
         uses: pypa/gh-action-pypi-publish@v1.4.1
         with:
