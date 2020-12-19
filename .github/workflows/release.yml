@@ -30,14 +30,23 @@ jobs:
     container: python:3-slim
     steps:
       - uses: actions/checkout@v2
-      - name: distribution
+        with:
+          - repository: ${{ github.repository }} # add TUW repo to be sure?
+          - ref: ${{ github.ref }} # make sure to checkout tag
+      - name: dist
         run: |
           python -m pip install --upgrade pip
           pip install setuptools wheel twine
+          python setup.py --version
           python setup.py sdist # bdist_wheel
       - name: Publish distribution to Test PyPI
         # if: startsWith(github.ref, 'refs/tags') # todo: add for safety for real pypi
         uses: pypa/gh-action-pypi-publish@v1.4.1
         with:
+          skip_existing: true
+          verbose: true
+          verify_metadata: true
+          packages_dir: dist/
+          user: __toke__
           password: ${{ secrets.TEST_PYPI_API_TOKEN }} # todo: change token for real pypi
           repository_url: https://test.pypi.org/legacy/ # todo: delete for real pypi
