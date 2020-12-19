@@ -12,6 +12,15 @@ jobs:
     steps: # see also https://github.com/actions/create-release
       - name: Checkout code
         uses: actions/checkout@v2
+#      # This step will retry until required check passes
+#      # and will fail the whole workflow if the check conclusion is not a success
+#      - name: Wait on tests
+#      uses: lewagon/wait-on-check-action@master # We are in the early stages of release process, so using master is your best bet
+#      with:
+#        ref: master # can be commit SHA or tag too
+#        check-name: test # name of the existing check - omit to wait for all checks
+#        repo-token: ${{ secrets.GITHUB_TOKEN }}
+#        wait-interval: 20 # seconds
       - name: Create Release
         # id: create_release
         uses: actions/create-release@v1
@@ -33,10 +42,9 @@ jobs:
         with:
           repository: ${{ github.repository }} # add TUW repo to be sure?
           ref: ${{ github.ref }} # make sure to checkout tag
-      - name: dist
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install setuptools wheel twine
+          pip3 install setuptools wheel twine
           python setup.py --version
           python setup.py sdist # bdist_wheel
       - name: Publish distribution to Test PyPI
