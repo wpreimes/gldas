@@ -8,7 +8,6 @@ name: Release Package
 jobs:
   release:
     name: Create Package Release 📦
-    needs: build
     runs-on: ubuntu-latest
     steps: # see also https://github.com/actions/create-release
       - name: Checkout code
