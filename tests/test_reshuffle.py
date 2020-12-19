@@ -1,4 +1,3 @@
-"""
 import os
 import glob
 import tempfile
@@ -40,4 +39,3 @@ def test_reshuffle(landpoints, bbox, n_files_should):
     ts_SM10_40_values_should = np.array([50.065, 50.064, 50.062,
                                     50.060, 50.059, 50.059, 50.059], dtype=np.float32)
     nptest.assert_allclose(ts['SoilMoi10_40cm_inst'].values, ts_SM10_40_values_should,rtol=1e-5)
-"""
