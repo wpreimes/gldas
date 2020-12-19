@@ -43,7 +43,9 @@ jobs:
           repository: ${{ github.repository }} # add TUW repo to be sure?
           ref: ${{ github.ref }} # make sure to checkout tag
       - name: Install dependencies
+        shell: bash -l {0}
         run: |
+          git tag
           pip3 install setuptools wheel twine
           python setup.py --version
           python setup.py sdist # bdist_wheel
