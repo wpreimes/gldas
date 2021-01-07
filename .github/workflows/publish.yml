@@ -17,7 +17,7 @@ jobs:
   publish:
     name: Upload to Pypi 🚀
     # needs original repo (TUW-GEO) and tagged commit (v*)
-    if: startsWith(github.ref, 'refs/tags/v') && startsWith(github.repository, '$RELEASE_ACCOUNT/')
+    #if: startsWith(github.ref, 'refs/tags/v') && startsWith(github.repository, '$RELEASE_ACCOUNT/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
