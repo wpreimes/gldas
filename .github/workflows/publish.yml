@@ -6,7 +6,7 @@ name: pypi
 
 on:
   release:
-    types: [published] # only on tagged github releases, (a simple tag is not enough!)
+    types: [released] # only on tagged github releases, (a simple tag is not enough!)
 
 jobs:
   publish:
