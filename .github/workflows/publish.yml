@@ -11,7 +11,7 @@ env:
 
 on:
   release:
-    types: [released] # only on tagged github releases, (a simple tag is not enough!)
+    types: [published] # only on tagged github releases, (a simple tag is not enough!)
 
 jobs:
   publish:
