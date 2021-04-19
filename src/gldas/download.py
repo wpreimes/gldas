@@ -39,18 +39,22 @@ from datedown.fname_creator import create_dt_fpath
 from datedown.interface import download_by_dt
 from datedown.down import download
 
+def sync_files(start_date, end_date):
+    # synchronise all files between two dates of a remote dataset
+    # into a local folder.
+    pass
 
 def gldas_folder_get_version_first_last(
-    root, fmt=None, subpaths=["{time:%Y}", "{time:%j}"]
+    root, fmt=None, subpaths=("{time:%Y}", "{time:%j}")
 ):
     """
     Get product version and first and last product which exists under the root folder.
 
     Parameters
     ----------
-    root: string
+    root: str
         Root folder on local filesystem
-    fmt: string, optional
+    fmt: str, optional
         Formatting string
         (default: "GLDAS_NOAH025_3H.A{time:%Y%m%d.%H%M}.0{version:2s}.nc4")
     subpaths: list, optional
@@ -58,7 +62,7 @@ def gldas_folder_get_version_first_last(
 
     Returns
     -------
-    version: string
+    version: str
         Found product version
     start: datetime.datetime
         First found product datetime
