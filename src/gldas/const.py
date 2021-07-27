@@ -1,9 +1,13 @@
 
 
-# GLDAS netcdf filename convention
-data_fn_templ = "{shortname}.A{date}.{time}.{version}.{ext}"
-data_fn_templ_dt_format = '%Y%m%d.%H%M'
+# GLDAS netcdf filename conventions, tried in order
+fn_templates = [
+    "{shortname}.A{date}.{time}.{vers_id}.{ext}",
+    "{shortname}.A{date}.{vers_id}.{ext}",
+    ]
 
+gldas_url = "https://hydro1.gesdisc.eosdis.nasa.gov/data/GLDAS/"
+AUTH_HOST = 'urs.earthdata.nasa.gov'
 
 class DataDirError(IOError):
     def __int__(self, directory):

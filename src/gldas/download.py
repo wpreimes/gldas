@@ -30,6 +30,8 @@ import glob
 import argparse
 from functools import partial
 
+from gldas.connections import GldasRemote, GldasLocal
+
 from trollsift.parser import validate, parse, globify
 from datetime import datetime
 from datedown.interface import mkdate
@@ -39,184 +41,39 @@ from datedown.fname_creator import create_dt_fpath
 from datedown.interface import download_by_dt
 from datedown.down import download
 
-def sync_files(start_date, end_date):
-    # synchronise all files between two dates of a remote dataset
-    # into a local folder.
-    pass
 
-def gldas_folder_get_version_first_last(
-    root, fmt=None, subpaths=("{time:%Y}", "{time:%j}")
-):
+
+def get_time_range(dataset=None):
     """
-    Get product version and first and last product which exists under the root folder.
+    Get NOAH GLDAS start dates for one or all products.
 
     Parameters
     ----------
-    root: str
-        Root folder on local filesystem
-    fmt: str, optional
-        Formatting string
-        (default: "GLDAS_NOAH025_3H.A{time:%Y%m%d.%H%M}.0{version:2s}.nc4")
-    subpaths: list, optional
-        Format of the subdirectories under root (default: ['{:%Y}', '{:%j}']).
+    dataset : str, optional (default: None)
+        Product name, if None is passed, all are checked
 
     Returns
     -------
-    version: str
-        Found product version
-    start: datetime.datetime
-        First found product datetime
-    end: datetime.datetime
-        Last found product datetime
+    prod_time_range : dict[str, tuple]
+        GLDAS Product and time ranges-
     """
-    if fmt is None:
-        fmt = "GLDAS_NOAH025_3H{ep}.A{time:%Y%m%d.%H%M}.0{version:2s}.nc4"
+    prod_time_range = dict()
+    remote = GldasRemote()
+    available_datasets = remote.available_datasets
 
-    start = None
-    end = None
-    version = None
-    first_folder = get_first_gldas_folder(root, subpaths)
-    last_folder = get_last_gldas_folder(root, subpaths)
+    if dataset is not None:
+        if dataset not in available_datasets:
+            raise ValueError(f"Passed dataset {dataset} is not one of "
+                             f"the available datasets {available_datasets}")
+        available_datasets = [dataset]
 
-    if first_folder is not None:
-        files = sorted(glob.glob(os.path.join(first_folder, globify(fmt))))
-        data = parse(fmt, os.path.split(files[0])[1])
-        start = data["time"]
-        ep = data["ep"]
-        version = f"GLDAS_Noah_v{data['version']}_025{data['ep']}"
+    for d in sorted(available_datasets):
+        remote.connect(d)
 
-    if last_folder is not None:
-        files = sorted(glob.glob(os.path.join(last_folder, globify(fmt))))
-        data = parse(fmt, os.path.split(files[-1])[1])
-        end = data["time"]
+        prod_time_range[d] = remote.get_first_last_item()
 
-    return version, start, end
+        # if dataset is None:
 
-
-def get_last_gldas_folder(root, subpaths):
-    """
-    Get last GLDAS folder name.
-
-    Parameters
-    ----------
-    root : str
-        Root path.
-    subpaths : list of str
-        Subpath information.
-
-    Returns
-    -------
-    directory : str
-        Last folder name.
-    """
-    directory = root
-    for level, subpath in enumerate(subpaths):
-        last_dir = get_last_formatted_dir_in_dir(directory, subpath)
-        if last_dir is None:
-            directory = None
-            break
-        directory = os.path.join(directory, last_dir)
-
-    return directory
-
-
-def get_first_gldas_folder(root, subpaths):
-    """
-    Get first GLDAS folder name.
-
-    Parameters
-    ----------
-    root : str
-        Root path.
-    subpaths : list of str
-        Subpath information.
-
-    Returns
-    -------
-    directory : str
-        First folder name.
-    """
-    directory = root
-    for level, subpath in enumerate(subpaths):
-        last_dir = get_first_formatted_dir_in_dir(directory, subpath)
-        if last_dir is None:
-            directory = None
-            break
-        directory = os.path.join(directory, last_dir)
-
-    return directory
-
-
-def get_last_formatted_dir_in_dir(folder, fmt):
-    """
-    Get the (alphabetically) last directory in a directory
-    which can be formatted according to fmt.
-
-    Parameters
-    ----------
-    folder : str
-        Folder name.
-    fmt : str
-        Format string.
-
-    Returns
-    -------
-    last_elem : str
-        Last formatted directory.
-    """
-    last_elem = None
-    root_elements = sorted(os.listdir(folder))
-    for root_element in root_elements[::-1]:
-        if os.path.isdir(os.path.join(folder, root_element)):
-            if validate(fmt, root_element):
-                last_elem = root_element
-                break
-
-    return last_elem
-
-
-def get_first_formatted_dir_in_dir(folder, fmt):
-    """
-    Get the (alphabetically) first directory in a directory
-    which can be formatted according to fmt.
-
-    Parameters
-    ----------
-    folder : str
-        Folder name.
-    fmt : str
-        Format string.
-
-    Returns
-    -------
-    first_elem : str
-        First formatted directory.
-    """
-    first_elem = None
-    root_elements = sorted(os.listdir(folder))
-    for root_element in root_elements:
-        if os.path.isdir(os.path.join(folder, root_element)):
-            if validate(fmt, root_element):
-                first_elem = root_element
-                break
-
-    return first_elem
-
-
-def get_gldas_start_date(product):
-    """
-    Get NOAH GLDAS start date.
-
-    Parameters
-    ----------
-    product : str
-        Product name.
-
-    Returns
-    -------
-    start_date : datetime
-        Start date of NOAH GLDAS product.
-    """
     dt_dict = {
         "GLDAS_Noah_v20_025": datetime(1948, 1, 1, 3),
         "GLDAS_Noah_v21_025": datetime(2000, 1, 1, 3),

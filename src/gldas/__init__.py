@@ -1,3 +1,4 @@
+import os
 import sys
 
 if sys.version_info[:2] >= (3, 8):
@@ -14,3 +15,13 @@ except PackageNotFoundError:  # pragma: no cover
     __version__ = "unknown"
 finally:
     del version, PackageNotFoundError
+
+# Checks if .gldasrc existis in /home
+# if not, it assumes that the env variable was set
+# in a different way and already exists.
+from pathlib import Path
+home = str(Path.home())
+gldasrc = os.path.join(home, '.gldasrc')
+if os.path.isfile(gldasrc):
+    from dotenv import load_dotenv
+    load_dotenv(gldasrc)
