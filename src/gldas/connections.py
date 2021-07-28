@@ -20,6 +20,7 @@ import requests
 import subprocess
 import getpass
 from dataclasses import dataclass
+from pathlib import Path
 
 class SessionWithHeaderRedirection(requests.Session):
     # see: https://wiki.earthdata.nasa.gov/display/EL/How+To+Access+Data+With+Python
@@ -181,6 +182,38 @@ class DatasetConnection:
 
         return folders
 
+    def list_files_for_subdir(self,
+                              year: int,
+                              subdir: Optional[str] = None,
+                              extension: Optional[str] = '.nc4') -> list:
+        """
+        Implements file extension as pattern to extract files from subdir
+
+        Parameters
+        ----------
+        year : int
+            Year to extract files for
+        subdir : str, optional (default: None)
+            Subdir to extract files for, e.g. 001 for DOY structure, or 12 for month
+            structure or None if files are location in the year folder.
+
+        Returns
+        -------
+        files : list
+            List of files in the subdir for year
+        """
+        if subdir is None:
+            subdirs = (str(year),)
+        else:
+            subdirs = (str(year), subdir)
+
+        if self.subdir_pattern is None:
+            if subdir is not None:
+                raise ValueError("No subdirs for year for the currently "
+                                 "active dataset.")
+
+        return self.list_files(subdirs=subdirs, patterns=(f'*{extension}',))
+
     def parse_filename(self, filename):
         """
         Derive dataset info from filename.
@@ -193,10 +226,12 @@ class DatasetConnection:
 
         Returns
         -------
-        info: dict
+        cont: dict
             dataset, early Product indicator, datetime, version, file type
         fntempl : str
             Filename template.
+        dttempl: str
+            Datetime template used in filename
         """
         for fntempl in glob.fn_templates:
             cont = parse(fntempl, filename)
@@ -227,7 +262,7 @@ class GldasRemote(DatasetConnection):
     subdir_pattern : str
     subdir_templ : str
     fntempl : str
-    time_rangee : Tuple[datetime, datetime]
+    time_range : Tuple[datetime, datetime]
     session : SessionWithHeaderRedirection
 
     def __init__(self,
@@ -365,14 +400,16 @@ class GldasRemote(DatasetConnection):
             subdirs = (subdirs, )
         return '/'.join((self.root,) + subdirs)
 
-    def _list_content(self,
-                      subdirs: Union[tuple, str] = '',
-                      ignore: Optional[list]=None,
-                      pattern: Optional[str]='*',
-                      type: Optional[str]='all',
-                      absolute: Optional[bool]=False) -> dict:
+    def _list_content(
+            self,
+            subdirs: Union[tuple, str] = '',
+            ignore: Optional[list]=None,
+            pattern: Optional[str]='*',
+            type: Optional[str]='all',
+            absolute: Optional[bool]=False,
+            ) -> dict:
         """
-        List content from connection.
+        List content from remote connection.
 
         Parameters
         ----------
@@ -416,7 +453,7 @@ class GldasRemote(DatasetConnection):
             table = table.loc[flags, columns]
             cont = table.to_dict(orient='list')
         except urllib.error.HTTPError:
-            cont = []
+            cont = {}
 
         names = []
         for n in cont['Name'].copy():
@@ -429,38 +466,6 @@ class GldasRemote(DatasetConnection):
         cont['Name'] = names
 
         return cont
-
-    def list_files_for_subdir(self,
-                              year: int,
-                              subdir: Optional[str] = None,
-                              extension: Optional[str] = '.nc4') -> list:
-        """
-        Implements file extension as pattern to extract files from subdir
-
-        Parameters
-        ----------
-        year : int
-            Year to extract files for
-        subdir : str, optional (default: None)
-            Subdir to extract files for, e.g. 001 for DOY structure, or 12 for month
-            structure or None if files are location in the year folder.
-
-        Returns
-        -------
-        files : list
-            List of files in the subdir for year
-        """
-        if subdir is None:
-            subdirs = (str(year),)
-        else:
-            subdirs = (str(year), subdir)
-
-        if self.subdir_pattern is None:
-            if subdir is not None:
-                raise ValueError("No subdirs for year for the currently "
-                                 "active dataset.")
-
-        return self.list_files(subdirs=subdirs, patterns=(f'*{extension}',))
 
     def list_years(self, as_int: Optional[bool]=False) -> list:
         """
@@ -582,7 +587,9 @@ class GldasRemote(DatasetConnection):
                 local_root: str,
                 subdirs: Optional[Union[str, tuple]]=None,
                 xml: Optional[bool] = False,
-                recursive: Optional[bool]=True):
+                recursive: Optional[bool]=True,
+                patterns='*.nc4',
+                **kwargs):
         """
         Download all netcdf files in a subdir
 
@@ -598,6 +605,8 @@ class GldasRemote(DatasetConnection):
             Also download the accoring xml file for the nc file.
         recursive : bool, Optional (default: True)
             Downloads all netcdf file in the passed subdir recursively.
+        patterns: str or list[str], optional (default: *.nc4)
+            Filename patterns of files to download
         """
         if isinstance(subdirs, str):
             subdirs = (subdirs, )
@@ -612,7 +621,9 @@ class GldasRemote(DatasetConnection):
             folders = self.list_folders(subdirs, pattern=self.subdir_pattern)
 
         if len(folders) == 0:
-            for ncfile in self.list_files(subdirs, patterns=['*.nc4']):
+            for ncfile in self.list_files(subdirs,
+                                          patterns=patterns,
+                                          **kwargs):
                 self.filedown(url=f"{self._join_path(subdirs)}/{ncfile}",
                               local_root=os.path.join(local_root, *subdirs),
                               xml=xml)
@@ -629,6 +640,8 @@ class GldasLocal(DatasetConnection):
     Connection to local GLDAS data
     """
 
+    path: str
+
     def __init__(self,
                  path:str):
         """
@@ -643,7 +656,13 @@ class GldasLocal(DatasetConnection):
         if not os.path.exists(path):
             raise IOError(path)
 
-        super().__init__(path)
+        super().__init__()
+
+        self.path = path
+
+    @property
+    def root(self) -> str:
+        return self.path
 
     def __repr__(self):
         return f"Local GLDAS Data: {self.root} \n " \
@@ -657,11 +676,21 @@ class GldasLocal(DatasetConnection):
             type: Optional[Literal['all', 'dir', 'file']] = 'all',
             absolute: Optional[bool] = False,
             ) -> dict:
+        """
+        List content from local connection.
 
+        Parameters
+        ----------
+        subdirs : List of subdirs
+        ignore: List of names to ignore
+        pattern : naming pattern to filter files/folders
+        type : 'all', 'dir' or 'file'
+        absolute : Whether to return only names or full paths
+        """
         if ignore is None:
             ignore = []
 
-        def ffilter(path):
+        def __ffilter(path):
             name = os.path.basename(path)
             flags = [name not in ignore,
                      isinstance(name, str),
@@ -682,21 +711,20 @@ class GldasLocal(DatasetConnection):
         try:
             files = os.listdir(self._join_path(subdirs))
             paths = np.array([self._join_path((*subdirs, f)) for f in files])
-            dates = np.array([time.ctime(os.path.getmtime(p)) for p in paths])
+            dates = np.array([datetime.fromtimestamp(Path(p).stat().st_mtime)
+                              for p in paths])
             sizes = np.array([os.path.getsize(p) for p in paths])
-            flags = np.vectorize(ffilter)(paths).tolist()
+            flags = np.vectorize(__ffilter)(paths).tolist()
 
-            cont = {'File': paths[flags].tolist()}
-            if date:
-                cont['Last Modified'] = dates[flags].tolist()
-            if size:
-                cont['Size'] = sizes[flags].tolist()
+            cont = {'Name': paths[flags].tolist()}
+            cont['Last modified'] = dates[flags].tolist()
+            cont['Size'] = sizes[flags].tolist()
 
         except FileNotFoundError:
             cont = {}
 
         if not absolute:
-            cont['File'] = [os.path.basename(c) for c in cont['File']]
+            cont['Name'] = [os.path.basename(c) for c in cont['Name']]
 
         return cont
 
@@ -706,7 +734,11 @@ class GldasLocal(DatasetConnection):
         return os.path.join(self.root, *subdirs)
 
 if __name__ == '__main__':
-    remote = GldasRemote("GLDAS_NOAH025_3H.2.1", username=os.environ['GLDAS_USER'], password=os.environ['GLDAS_PWD'],)
+    remote = GldasRemote("GLDAS_NOAH025_3H.2.1",
+                         username=os.environ['GLDAS_USER'],
+                         password=os.environ['GLDAS_PWD'],)
+    remote.dirdown(local_root="/home/wolfgang/data-read/temp/",
+                   subdirs=('2015', '001'), xml=True, recursive=True)
     # remote.datedown(datetime(2003,5,3,9), '/home/wolfgang/data-write/temp/gldas/', xml=True)
     # remote.dirdown(subdirs=None, recursive=True, local_root='/home/wolfgang/data-write/temp/gldas/',
     #                xml=False)
