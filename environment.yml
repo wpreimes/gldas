@@ -17,5 +17,9 @@ dependencies:
     - trollsift
     - pytest-cov
     - coverage
+    - parse
+    - requests
+    - typing_extensions
+    - lxml
     - pytest
     - python-dotenv

@@ -18,6 +18,9 @@ class TestRemoteConnection(unittest.TestCase):
                             password=os.getenv('GLDAS_PWD'))
         assert self.testdataset in self.remote.dataset
 
+    def test_properties(self):
+        assert self.remote.is_remote is True
+
     def test_available_datasets(self):
         assert 'GLDAS_NOAH025_3H_EP.2.1' in self.remote.available_datasets
         assert 'GLDAS_NOAH025_3H.2.0' in self.remote.available_datasets
@@ -67,6 +70,21 @@ class TestLocalConnection(unittest.TestCase):
     def setUpClass(cls) -> None:
         rootpath = testdata_path / 'GLDAS_NOAH_image_data'
         cls.local = GldasLocal(path=rootpath)
+
+    def tests_to_implement(self):
+        local = GldasLocal("/home/wolfgang/code/gldas/tests/test-data/GLDAS_NOAH_image_data")
+        files = local.list_files(('2015', '001'), '*.nc4')
+        cont, fntempl, dttempl = local.parse_filename(files[0])
+        folders = local.list_folders('2015')
+        sd = local.list_subdirs_for_year(2015)
+        fsd = local.list_files_for_subdir(2015, '001', '*xml')
+
+        years = local.list_years(as_int=True)
+        fl = local.get_first_last_item(('2015', '001'))
+
+
+    def test_properties(self):
+        assert self.remote.is_remote is False
 
     def test_get_first_last_item(self):
         first, last = self.local.get_first_last_item(('2015', '001'))

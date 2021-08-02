@@ -1,5 +1,4 @@
 import urllib.error
-
 import numpy as np
 import pandas as pd
 import fnmatch
@@ -11,7 +10,7 @@ from urllib.parse import urlparse, urljoin
 from functools import wraps, reduce
 from parse import parse
 from datetime import datetime, timedelta
-import gldas.const as glob
+import gldas.const as globals
 import time
 from typing import Callable, Optional, Union, Tuple
 from typing_extensions import Literal
@@ -21,10 +20,11 @@ import subprocess
 import getpass
 from dataclasses import dataclass
 from pathlib import Path
+import glob
 
 class SessionWithHeaderRedirection(requests.Session):
     # see: https://wiki.earthdata.nasa.gov/display/EL/How+To+Access+Data+With+Python
-    AUTH_HOST = glob.AUTH_HOST
+    AUTH_HOST = globals.AUTH_HOST
     def __init__(self, username, password):
         super().__init__()
         self.auth = (username, password)
@@ -59,6 +59,8 @@ class DatasetConnection:
     """ 
     GLDAS data collection (remote or local)
     """
+
+    is_remote: bool
 
     @abc.abstractclassmethod
     def _list_content(self,
@@ -98,6 +100,74 @@ class DatasetConnection:
     def root(self) -> str:
         # Root path or URL to remote or local data set
         pass
+
+    @abc.abstractclassmethod
+    def _join_path(self, subdirs: Union[str, Tuple[str]]) -> str:
+        # Must implement a way to join subdirs to URL or local path
+        pass
+
+    def list_years(self, as_int: Optional[bool]=False) -> list:
+        """
+        Implements 4 digit pattern for list_folders() to extract yearly folders
+        for the connected dataset.
+
+        Parameters
+        ----------
+        as_int : bool, optional (default: False)
+            Convert the subdirs to integers instead of return the strings.
+
+        Returns
+        -------
+        years : list
+            Years that contain data for the connected dataset.
+        """
+
+        pattern = "[0-9][0-9][0-9][0-9]"
+
+        if self.is_remote:
+            pattern = f"{pattern}/"
+
+        return [int(y) if as_int else y
+                for y in self.list_folders(pattern=pattern)]
+
+    def _infos_from_files(self) -> (str, str, str, str, datetime, datetime):
+        # detect subdir structure and fn template
+        # this is done after connecting to a dataset (remote or local)
+
+        years = self.list_years(as_int=False)
+
+        first_year, last_year = years[0], years[-1]
+        first_folder_subdirs = sorted(self.list_folders(first_year))
+        last_folder_subdirs = sorted(self.list_folders(last_year))
+
+        if len(first_folder_subdirs) == len(last_folder_subdirs) == 0:
+            subdir_pattern = None  # all files for one year in one dir
+            subdir_templ = ('%Y', )
+            subdirs_first = (first_year,)
+            subdirs_last = (last_year,)
+        else:
+            if len(first_folder_subdirs[0]) == 2 or len(last_folder_subdirs[0]) == 2:
+                # monthly subdirs
+                subdir_pattern = "[0-9][0-9]/" if self.is_remote else "[0-9][0-9]"
+                subdir_templ = ('%Y', '%m')
+            else:
+                # doy subdirs
+                subdir_pattern = "[0-9][0-9][0-9]/" if self.is_remote else "[0-9][0-9][0-9]"
+                subdir_templ = ('%Y', '%j')
+            subdirs_first = (first_year, first_folder_subdirs[0])
+            subdirs_last = (last_year, last_folder_subdirs[-1])
+
+        first_file = self.list_files(subdirs=subdirs_first, patterns='*.nc4')[0]
+        last_file = self.list_files(subdirs=subdirs_last, patterns='*.nc4')[-1]
+
+        cont, fntempl, dttempl = self.parse_filename(first_file)
+
+        p, fn_templ, dttempl = self.parse_filename(first_file)
+        start_date = p['datetime']
+        p, _, _ = self.parse_filename(last_file)
+        end_date = p['datetime']
+
+        return subdir_pattern, subdir_templ, fntempl, dttempl, start_date, end_date
 
     def get_first_last_item(self,
                             subdirs='',
@@ -144,14 +214,18 @@ class DatasetConnection:
         """
         files = []
 
+        if isinstance(subdirs, str):
+            subdirs = (subdirs,)
+
         if isinstance(patterns, str):
             patterns = [patterns]
 
         for pattern in patterns:
-            files += self._list_content(subdirs,
-                                        pattern=pattern,
-                                        type='file',
-                                        **kwargs)['Name']
+            cont = self._list_content(subdirs,
+                                      pattern=pattern,
+                                      type='file',
+                                      **kwargs)
+            files += cont['Name']
 
         return files
 
@@ -181,6 +255,31 @@ class DatasetConnection:
                                      **kwargs)['Name']
 
         return folders
+
+    def list_subdirs_for_year(self,
+                              year: Union[str, int],
+                              as_int: Optional[bool]=False) -> list:
+        """
+        List the subdirs of a year for the currely connected dataset.
+
+        Parameters
+        ----------
+        year : int or str
+            Year to list subfolders for
+        as_int : bool, optional (default: False)
+            Return the subdirs as integers instead of strings
+
+        Returns
+        -------
+        subdirs : list
+            List of subdirs for the selected year
+        """
+        if self.subdir_pattern is None:
+            return list()
+        else:
+            return [int(d) if as_int else d
+                    for d in self.list_folders(subdirs=(str(year),),
+                                               pattern=self.subdir_pattern)]
 
     def list_files_for_subdir(self,
                               year: int,
@@ -233,7 +332,7 @@ class DatasetConnection:
         dttempl: str
             Datetime template used in filename
         """
-        for fntempl in glob.fn_templates:
+        for fntempl in globals.fn_templates:
             cont = parse(fntempl, filename)
             if cont:
                 break
@@ -256,8 +355,11 @@ class DatasetConnection:
 
         return cont, fntempl, dttempl
 
+
 class GldasRemote(DatasetConnection):
     """ Connection to remote GLDAS data """
+
+    # Sets:
     dataset : str
     subdir_pattern : str
     subdir_templ : str
@@ -285,7 +387,7 @@ class GldasRemote(DatasetConnection):
             Password used to log in at 'urs.earthdata.nasa.gov'.
             If None is passed, no data can be downloaded.
         """
-        self.url = glob.gldas_url
+        self.url = globals.gldas_url
         self.available_datasets = self.list_folders(subdirs='', pattern='GLDAS*')
 
         if dataset is None:
@@ -294,7 +396,7 @@ class GldasRemote(DatasetConnection):
             # TODO: if user/pwd is none use the env variables, if they are not set, show descriptive error here.
             self.connect(dataset, username, password)  # connect directly
 
-        super(GldasRemote, self).__init__()
+        super(GldasRemote, self).__init__(is_remote=True)
 
     def __repr__(self) -> str:
         if self.dataset is None:
@@ -304,8 +406,8 @@ class GldasRemote(DatasetConnection):
                    f"  {ds}"
         else:
             return f"Connected to `{self.dataset}` " \
-                   f"available from {str(self.time_range[0])} to {str(self.time_range[1])} " \
-                   f"at {self.root}"
+                   f"available from {str(self.time_range[0])} to " \
+                   f"{str(self.time_range[1])} at {self.root}"
 
     @property
     def root(self) -> str:
@@ -332,15 +434,6 @@ class GldasRemote(DatasetConnection):
         password: str, Optional (default: None)
             Password used to log in at 'urs.earthdata.nasa.gov'.
             If None is passed, no data can be downloaded.
-
-        Sets
-        ----
-        self.dataset
-        self.subdir_pattern
-        self.subdir_templ
-        self.fntempl
-        self.time_range
-        self.session
         """
 
         if dataset not in self.available_datasets:
@@ -348,46 +441,8 @@ class GldasRemote(DatasetConnection):
                              f"Select one of: {self.available_datasets}")
         self.dataset = dataset
 
-        # detect subdir structure and fn template
-
-        years = self.list_years(as_int=False)
-
-        first_folder_subdirs = []
-
-        first_year, last_year = years[0], years[-1]
-        first_folder_subdirs = sorted(self.list_folders(first_year))
-        last_folder_subdirs = sorted(self.list_folders(last_year))
-
-        if len(first_folder_subdirs) == len(last_folder_subdirs) == 0:
-            subdir_pattern = None  # all files for one year in one dir
-            subdir_templ = ('%Y', )
-            subdirs_first = (first_year,)
-            subdirs_last = (last_year,)
-        else:
-            if len(first_folder_subdirs[0]) == 2 or len(last_folder_subdirs[0]) == 2:
-                subdir_pattern = "[0-9][0-9]/"  # monthly subdirs
-                subdir_templ = ('%Y', '%m')
-            else:
-                subdir_pattern = "[0-9][0-9][0-9]/"  # doy subdirs
-                subdir_templ = ('%Y', '%j')
-            subdirs_first = (first_year, first_folder_subdirs[0])
-            subdirs_last = (last_year, last_folder_subdirs[-1])
-
-        first_file = self.list_files(subdirs=subdirs_first, patterns='*.nc4')[0]
-        last_file = self.list_files(subdirs=subdirs_last, patterns='*.nc4')[-1]
-
-        cont, fntempl, dttempl = self.parse_filename(first_file)
-
-        self.subdir_pattern = subdir_pattern
-        self.subdir_templ = subdir_templ
-        self.fntempl = fntempl
-        self.dttempl = dttempl
-
-        p, fn_templ, dttempl = self.parse_filename(first_file)
-        start_date = p['datetime']
-        p, _, _ = self.parse_filename(last_file)
-        end_date = p['datetime']
-
+        self.subdir_pattern, self.subdir_templ, self.fntempl, \
+        dttempl, start_date, end_date = self._infos_from_files()
         self.time_range = (start_date, end_date)
 
         if password is None or username is None:
@@ -458,7 +513,7 @@ class GldasRemote(DatasetConnection):
         names = []
         for n in cont['Name'].copy():
             if absolute:
-                n = self._join_path(subdirs + (c,))
+                n = self._join_path(n)
             if n.endswith('/'):
                 n = n[:-1]
             names.append(n)
@@ -485,31 +540,6 @@ class GldasRemote(DatasetConnection):
 
         return [int(y) if as_int else y
                 for y in self.list_folders(pattern="[0-9][0-9][0-9][0-9]/")]
-
-    def list_subdirs_for_year(self,
-                              year: Union[str, int],
-                              as_int: Optional[bool]=False) -> list:
-        """
-        List the subdirs of a year for the currely connected dataset.
-
-        Parameters
-        ----------
-        year : int or str
-            Year to list subfolders for
-        as_int : bool, optional (default: False)
-            Return the subdirs as integers instead of strings
-
-        Returns
-        -------
-        subdirs : list
-            List of subdirs for the selected year
-        """
-        if self.subdir_pattern is None:
-            return list()
-        else:
-            return [int(d) if as_int else d
-                    for d in self.list_folders(subdirs=(str(year),),
-                                               pattern=self.subdir_pattern)]
 
     def filedown(self,
                  url:str,
@@ -645,28 +675,34 @@ class GldasLocal(DatasetConnection):
     def __init__(self,
                  path:str):
         """
-        Connects to a local folder where GLDAS image data is stored in annual / doy folders
+        Connects to a local folder where GLDAS image data is stored in annual
+        / doy folders
 
         Parameters
         ----------
         path : str
-            Local root path to the data directory that contains folders for each year.
+            Local root path to the data directory that contains folders for
+            each year.
         """
 
         if not os.path.exists(path):
             raise IOError(path)
 
-        super().__init__()
+        super().__init__(is_remote=False)
 
         self.path = path
+
+        self.subdir_pattern, self.subdir_templ, self.fntempl, \
+        dttempl, start_date, end_date = self._infos_from_files()
 
     @property
     def root(self) -> str:
         return self.path
 
-    def __repr__(self):
-        return f"Local GLDAS Data: {self.root} \n " \
-               f"{rjust(super().__repr__(), 3)} "
+    def _join_path(self, subdirs: Union[tuple, str]):
+        if isinstance(subdirs, str):
+            subdirs = (subdirs, )
+        return os.path.join(self.root, *subdirs)
 
     def _list_content(
             self,
@@ -707,38 +743,36 @@ class GldasLocal(DatasetConnection):
 
             return np.all(flags)
 
-        # list content of local dir
-        try:
-            files = os.listdir(self._join_path(subdirs))
-            paths = np.array([self._join_path((*subdirs, f)) for f in files])
-            dates = np.array([datetime.fromtimestamp(Path(p).stat().st_mtime)
-                              for p in paths])
-            sizes = np.array([os.path.getsize(p) for p in paths])
+        # get all files and :
+        # folders in subdir
+        glob_pattern = self._join_path(tuple([*subdirs, '*']))
+        paths = np.array([f for f in glob.glob(glob_pattern)])
+
+        if len(paths) > 0:
             flags = np.vectorize(__ffilter)(paths).tolist()
+        else:
+            flags = slice(None, None, None)
 
-            cont = {'Name': paths[flags].tolist()}
-            cont['Last modified'] = dates[flags].tolist()
-            cont['Size'] = sizes[flags].tolist()
+        cont = {'sizes': [], 'Last modified': [], 'Name': []}
 
-        except FileNotFoundError:
-            cont = {}
-
-        if not absolute:
-            cont['Name'] = [os.path.basename(c) for c in cont['Name']]
+        for p in paths[flags]:
+            p = Path(p)
+            cont['Last modified'].append(datetime.fromtimestamp(p.stat().st_mtime))
+            cont['sizes'].append(os.path.getsize(p))
+            cont['Name'].append(p.name if not absolute else str(p))
 
         return cont
 
-    def _join_path(self, subdirs: Union[tuple, str]):
-        if isinstance(subdirs, str):
-            subdirs = (subdirs, )
-        return os.path.join(self.root, *subdirs)
+    def __repr__(self):
+        return f"Local GLDAS Data: {self.root} \n "
+            # find out what dataset is in root from filenames?
+            #    f"{super().__repr__().rjust(3, ' ')}"
+
 
 if __name__ == '__main__':
-    remote = GldasRemote("GLDAS_NOAH025_3H.2.1",
-                         username=os.environ['GLDAS_USER'],
-                         password=os.environ['GLDAS_PWD'],)
-    remote.dirdown(local_root="/home/wolfgang/data-read/temp/",
-                   subdirs=('2015', '001'), xml=True, recursive=True)
+
+
+
     # remote.datedown(datetime(2003,5,3,9), '/home/wolfgang/data-write/temp/gldas/', xml=True)
     # remote.dirdown(subdirs=None, recursive=True, local_root='/home/wolfgang/data-write/temp/gldas/',
     #                xml=False)
