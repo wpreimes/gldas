@@ -40,6 +40,10 @@ class TestRemoteConnection(unittest.TestCase):
         assert self.remote.list_files_for_subdir(2015, '001', extension='.nc4')\
                == [f'GLDAS_NOAH025_3H.A20150101.{h:02}00.021.nc4' for h in range(0, 24, 3)]
 
+    def test_url4date(self):
+        assert self.remote.url4date(datetime(2015, 1, 1, 12, 0, 0)) == \
+               "https://hydro1.gesdisc.eosdis.nasa.gov/data/GLDAS/GLDAS_NOAH025_3H.2.1/2015/001/GLDAS_NOAH025_3H.A20150101.1200.021.nc4"
+
     def test_parse_filename(self):
         year = self.remote.list_folders()[0]
         first_folder = self.remote.list_folders((year,))[0]
@@ -58,11 +62,14 @@ class TestRemoteConnection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             self.remote.dirdown(local_root=tempdir,
                                 subdirs=('2015', '001'),
-                                patterns='*1800*.nc4',
-                                xml=True)
+                                recursive=True,
+                                patterns=('*1800*.nc4', '*1800*.nc4.xml'))
 
             assert len(os.listdir(os.path.join(tempdir, '2015', '001'))) == 2
 
+    def test_dap_access(self):
+        # todo: access via pydap using session should work
+        pass
 
 class TestLocalConnection(unittest.TestCase):
 
@@ -71,20 +78,8 @@ class TestLocalConnection(unittest.TestCase):
         rootpath = testdata_path / 'GLDAS_NOAH_image_data'
         cls.local = GldasLocal(path=rootpath)
 
-    def tests_to_implement(self):
-        local = GldasLocal("/home/wolfgang/code/gldas/tests/test-data/GLDAS_NOAH_image_data")
-        files = local.list_files(('2015', '001'), '*.nc4')
-        cont, fntempl, dttempl = local.parse_filename(files[0])
-        folders = local.list_folders('2015')
-        sd = local.list_subdirs_for_year(2015)
-        fsd = local.list_files_for_subdir(2015, '001', '*xml')
-
-        years = local.list_years(as_int=True)
-        fl = local.get_first_last_item(('2015', '001'))
-
-
     def test_properties(self):
-        assert self.remote.is_remote is False
+        assert self.local.is_remote is False
 
     def test_get_first_last_item(self):
         first, last = self.local.get_first_last_item(('2015', '001'))
@@ -92,19 +87,27 @@ class TestLocalConnection(unittest.TestCase):
         assert last == 'GLDAS_NOAH025_3H.A20150101.0000.021.nc4.xml'
 
     def test_list_folders(self):
-        folders = self.local.list_folders(ignore='doc')
+        folders = self.local.list_folders()
         assert folders == ['2015']
+        assert self.local.list_subdirs_for_year(2015, as_int=True) == [1]
+        assert self.local.list_years(as_int=False) == ['2015']
 
     def test_list_files_for_day(self):
+        assert self.local.list_files(('2015', '001'), patterns='*.xml')\
+                == ['GLDAS_NOAH025_3H.A20150101.0000.021.nc4.xml']
         assert self.local.list_files_for_subdir(2015, '001', extension='.nc4')\
                == ['GLDAS_NOAH025_3H.A20150101.0000.021.nc4']
+        assert self.local.list_files_for_subdir(2015, '001', extension='*.nc4')\
+                == ['GLDAS_NOAH025_3H.A20150101.0000.021.nc4']
+
 
     def test_parse_filename(self):
-        year = self.remote.list_folders()[0]
-        first_folder = self.remote.list_folders((year,))[0]
-        first_file = self.remote.list_files_for_subdir(year, first_folder, '*.nc4')[0]
+        year = self.local.list_folders()[0]
+        first_folder = self.local.list_folders((year,))[0]
+        first, last = self.local.get_first_last_item(subdirs=(year, first_folder),
+                                                     pattern='*.nc4')
 
-        cont, fntempl, dttempl = self.remote.parse_filename(first_file)
+        cont, fntempl, dttempl = self.local.parse_filename(first)
 
         assert isinstance(cont['datetime'], datetime)
         assert cont['shortname'] == cont['shortname']

@@ -22,6 +22,22 @@ from dataclasses import dataclass
 from pathlib import Path
 import glob
 
+"""
+
+todo:
+[] - pydap access still not working
+[] - parallel processes to filedown to parallelise all download functions
+
+
+
+import xarray as xr
+from pydap.cas.urs import setup_session
+ds_url = 'https://hydro1.gesdisc.eosdis.nasa.gov/data/GLDAS/GLDAS_CLSM10_M.2.1/2015/GLDAS_CLSM10_M.A201503.021.nc4'
+session = setup_session('wpreimes', 'ThisTestPWD1', check_url=ds_url)
+store = xr.backends.PydapDataStore.open(ds_url, session=session)
+ds = xr.open_dataset(store)
+
+"""
 class SessionWithHeaderRedirection(requests.Session):
     # see: https://wiki.earthdata.nasa.gov/display/EL/How+To+Access+Data+With+Python
     AUTH_HOST = globals.AUTH_HOST
@@ -66,7 +82,7 @@ class DatasetConnection:
     def _list_content(self,
                       subdirs: Union[tuple, str] = '',
                       ignore: Optional[list] = None,
-                      pattern: Optional[str] = '*',
+                      patterns: Optional[Union[str, tuple]] = '*',
                       type: Optional[Literal['all', 'dir', 'file']] = 'all',
                       absolute: Optional[bool] = False,
                       ) -> dict:
@@ -81,8 +97,8 @@ class DatasetConnection:
             folder or list of folders for which the content is returned.
         ignore: str or list[str], optional (default: None)
             List of names that should be ignored when listing contents
-        pattern: list, optional (default: *)
-            Filename/folder pattern, all elemtns are matched via fnmatch.
+        patterns: str or tuple, optional (default: *)
+            Filename/folder patterns, all elemtns are matched via fnmatch.
         type: 'all' or 'dir' or 'file', optional (default: 'all')
             Whether to consider file and directory names (all) or only file names (file)
             or only folder names (dir).
@@ -106,6 +122,15 @@ class DatasetConnection:
         # Must implement a way to join subdirs to URL or local path
         pass
 
+    @abc.abstractstaticmethod
+    def _ffilter(path: str,
+                 ignore: Optional[Union[list, str]] = None,
+                 patterns: Optional[Union[str, tuple]] = '*',
+                 type: Optional[Literal['all', 'dir', 'file']] = 'all') \
+            -> np.ndarray:
+        """ Filter function to differentiate between files and folders. """
+        pass
+
     def list_years(self, as_int: Optional[bool]=False) -> list:
         """
         Implements 4 digit pattern for list_folders() to extract yearly folders
@@ -125,10 +150,10 @@ class DatasetConnection:
         pattern = "[0-9][0-9][0-9][0-9]"
 
         if self.is_remote:
-            pattern = f"{pattern}/"
+            patterns = f"{pattern}/"
 
         return [int(y) if as_int else y
-                for y in self.list_folders(pattern=pattern)]
+                for y in self.list_folders(patterns=pattern)]
 
     def _infos_from_files(self) -> (str, str, str, str, datetime, datetime):
         # detect subdir structure and fn template
@@ -171,7 +196,7 @@ class DatasetConnection:
 
     def get_first_last_item(self,
                             subdirs='',
-                            pattern='*',
+                            patterns='*',
                             **kwargs) -> (str, str):
         """
         Get first and last item (sorted by name) in the passed dir.
@@ -180,8 +205,8 @@ class DatasetConnection:
         ----------
         subdirs : Union[str, tuple], optional (default: '')
             Subdirs in root
-        pattern: str, optional (default: '*')
-            Regex pattern for items to search.
+        patterns: str or tuple, optional (default: '*')
+            Regex patterns for items to search.
         kwargs : additional kwargs are passed to _list_content()
 
         Returns
@@ -193,12 +218,13 @@ class DatasetConnection:
         """
 
         content = sorted(self._list_content(
-            subdirs, ignore=None, pattern=pattern, **kwargs)['Name'])
+            subdirs, ignore=None, patterns=patterns, **kwargs)['Name'])
 
         return (content[0], content[-1]) if len(content) >= 1 else (None, None)
 
     def list_files(self,
                    subdirs='',
+                   recursive=False,
                    patterns='*',
                    **kwargs) -> list:
         """
@@ -208,8 +234,10 @@ class DatasetConnection:
         ----------
         subdirs : Union[str, tuple], optional (default: '')
             Subfolders in root where folders are searched.
+        recursive: bool, optional (default: False)
+            Look for files also in subdirs
         patterns : Union[str, tuple], optional (default: '*')
-            Regex pattern to filter certain files.
+            Regex patterns to filter certain FILES.
         kwargs : additional kwargs are passed to _list_content()
         """
         files = []
@@ -220,29 +248,40 @@ class DatasetConnection:
         if isinstance(patterns, str):
             patterns = [patterns]
 
-        for pattern in patterns:
+        if not recursive:
+            folders = tuple()
+        else:
+            folders = self.list_folders(subdirs, patterns='*')
+
+        if len(folders) == 0:
             cont = self._list_content(subdirs,
-                                      pattern=pattern,
+                                      patterns=patterns,
                                       type='file',
                                       **kwargs)
             files += cont['Name']
-
+        else:
+            for folder in folders:
+                print(folder)
+                files += self.list_files(tuple([*subdirs, folder]),
+                                         recursive=recursive,
+                                         patterns=patterns,
+                                         **kwargs)
         return files
 
     def list_folders(self,
                      subdirs='',
-                     pattern='*',
+                     patterns='*',
                      **kwargs) -> list:
         """
         Like _list_content but only lists folders, allows to exclude certain folders.
 
         Parameters
         ----------
-        subdirs : Union[str, tuple], optional (default: '')
+        subdirs: Union[str, tuple], optional (default: '')
             Subfolders in root where folders are searched.
-        pattern : str, optional (default: '*')
-            Regex pattern to filter certain folders.
-        kwargs : additional kwargs are passed to _list_content()
+        patterns: str or tuple, optional (default: '*')
+            Regex patterns to filter certain folders.
+        kwargs: additional kwargs are passed to _list_content()
         """
         if isinstance(subdirs, str):
             subdirs = (subdirs,)
@@ -250,7 +289,7 @@ class DatasetConnection:
         subdirs = tuple([str(s) for s in subdirs])
 
         folders = self._list_content(subdirs,
-                                     pattern=pattern,
+                                     patterns=patterns,
                                      type='dir',
                                      **kwargs)['Name']
 
@@ -279,14 +318,14 @@ class DatasetConnection:
         else:
             return [int(d) if as_int else d
                     for d in self.list_folders(subdirs=(str(year),),
-                                               pattern=self.subdir_pattern)]
+                                               patterns=self.subdir_pattern)]
 
     def list_files_for_subdir(self,
                               year: int,
                               subdir: Optional[str] = None,
                               extension: Optional[str] = '.nc4') -> list:
         """
-        Implements file extension as pattern to extract files from subdir
+        Implements file extension as patterns to extract files from subdir
 
         Parameters
         ----------
@@ -311,7 +350,7 @@ class DatasetConnection:
                 raise ValueError("No subdirs for year for the currently "
                                  "active dataset.")
 
-        return self.list_files(subdirs=subdirs, patterns=(f'*{extension}',))
+        return self.list_files(subdirs=subdirs, patterns=f'*{extension}')
 
     def parse_filename(self, filename):
         """
@@ -388,7 +427,9 @@ class GldasRemote(DatasetConnection):
             If None is passed, no data can be downloaded.
         """
         self.url = globals.gldas_url
-        self.available_datasets = self.list_folders(subdirs='', pattern='GLDAS*')
+        self.available_datasets = self.list_folders(subdirs='', patterns='GLDAS*')
+
+        super(GldasRemote, self).__init__(is_remote=True)
 
         if dataset is None:
             self.dataset = None  # connect later
@@ -396,7 +437,6 @@ class GldasRemote(DatasetConnection):
             # TODO: if user/pwd is none use the env variables, if they are not set, show descriptive error here.
             self.connect(dataset, username, password)  # connect directly
 
-        super(GldasRemote, self).__init__(is_remote=True)
 
     def __repr__(self) -> str:
         if self.dataset is None:
@@ -422,7 +462,7 @@ class GldasRemote(DatasetConnection):
                 password: Optional[str]=None):
         """
         Connect to one of the datasets that is listed in available_datasets.
-        And detect subdir structure and fn pattern
+        And detect subdir structure and fn patterns
 
         Parameters
         ----------
@@ -446,6 +486,10 @@ class GldasRemote(DatasetConnection):
         self.time_range = (start_date, end_date)
 
         if password is None or username is None:
+            password = os.environ['GLDAS_PWD']
+            username = os.environ['GLDAS_USER']
+
+        if password is None or username is None:
             self.session = None
         else:
             self.session = SessionWithHeaderRedirection(username, password)
@@ -455,13 +499,42 @@ class GldasRemote(DatasetConnection):
             subdirs = (subdirs, )
         return '/'.join((self.root,) + subdirs)
 
+    @staticmethod
+    def _ffilter(path: str,
+                 ignore: Optional[list] = None,
+                 patterns: Optional[Union[str, tuple]] = ('*',),
+                 type: Optional[Literal['all', 'dir', 'file']] = 'all') \
+            -> np.ndarray:
+        """ Filter function to differentiate between files and folders. """
+        if ignore is None:
+            ignore = []
+        elif isinstance(ignore, str):
+            ignore = [ignore]
+        if isinstance(patterns, str):
+            patterns = [patterns]
+            
+        ignore += ['Parent Directory', 'NaN'] # ALWAYS ignored
+
+        flags = [path not in ignore,
+                 isinstance(path, str),
+                 np.any([fnmatch.fnmatch(path, p) for p in patterns])]
+
+        if type.lower() == 'all':
+            pass
+        elif type.lower() == 'dir':
+            flags.append(path.endswith('/'))
+        elif type.lower() == 'file':
+            flags.append(not path.endswith('/'))
+        else:
+            raise NotImplementedError(f"Type not implemented: {type}")
+
+        return np.all(flags)
+        
     def _list_content(
             self,
             subdirs: Union[tuple, str] = '',
-            ignore: Optional[list]=None,
-            pattern: Optional[str]='*',
-            type: Optional[str]='all',
             absolute: Optional[bool]=False,
+            **filter_kwargs
             ) -> dict:
         """
         List content from remote connection.
@@ -470,50 +543,29 @@ class GldasRemote(DatasetConnection):
         ----------
         subdirs : List of subdirs
         ignore: List of names to ignore
-        pattern : naming pattern to filter files/folders
+        patterns : naming patterns to filter files/folders
         type : 'all', 'dir' or 'file'
         absolute : Whether to return only names or full paths
         """
-        if ignore is None:
-            ignore = []
-        elif isinstance(ignore, str):
-            ignore = [ignore]
+        # try:
+        table = pd.read_html(self._join_path(subdirs))[0]
+        columns = ['Name']
+        columns.append('Last modified')
+        columns.append('Size')
 
-        def __ffilter(name:str) -> np.array:
-            flags = [name not in ignore,
-                     isinstance(name, str),
-                     fnmatch.fnmatch(name, pattern)]
-            if type.lower() == 'all':
-                pass
-            elif type.lower() == 'dir':
-                flags.append(name.endswith('/'))
-            elif type.lower() == 'file':
-                flags.append(not name.endswith('/'))
-            else:
-                raise NotImplementedError(f"Type not implemented: {type}")
+        table.dropna(subset=('Name',), inplace=True)
 
-            return np.all(flags)
-
-        try:
-            ignore = list(ignore)
-            ignore += ['Parent Directory', 'NaN'] # ALWAYS ignored
-            table = pd.read_html(self._join_path(subdirs))[0]
-            columns = ['Name']
-            columns.append('Last modified')
-            columns.append('Size')
-
-            table.dropna(subset=('Name',), inplace=True)
-
-            flags = table['Name'].apply(__ffilter)
-            table = table.loc[flags, columns]
-            cont = table.to_dict(orient='list')
-        except urllib.error.HTTPError:
-            cont = {}
+        flags = np.array([self._ffilter(path=path, **filter_kwargs)
+                          for path in table['Name'].values])
+        table = table.loc[flags, columns]
+        cont = table.to_dict(orient='list')
+        # except urllib.error.HTTPError:
+        #     cont = {}
 
         names = []
         for n in cont['Name'].copy():
             if absolute:
-                n = self._join_path(n)
+                n = self._join_path((*subdirs, n))
             if n.endswith('/'):
                 n = n[:-1]
             names.append(n)
@@ -524,7 +576,7 @@ class GldasRemote(DatasetConnection):
 
     def list_years(self, as_int: Optional[bool]=False) -> list:
         """
-        Implements 4 digit pattern for list_folders() to extract yearly folders
+        Implements 4 digit patterns for list_folders() to extract yearly folders
         for the connected dataset.
 
         Parameters
@@ -539,23 +591,40 @@ class GldasRemote(DatasetConnection):
         """
 
         return [int(y) if as_int else y
-                for y in self.list_folders(pattern="[0-9][0-9][0-9][0-9]/")]
+                for y in self.list_folders(patterns="[0-9][0-9][0-9][0-9]/")]
+
+    def url4date(self, dt: datetime) -> str:
+        """
+        Create the URL to a file for the current dataset for a certain date
+        """
+        subdirs = [dt.strftime(e) for e in self.subdir_templ]
+
+        if len(subdirs) == 1:
+            subdirs = (subdirs[0], )
+        else:
+            subdirs = tuple(subdirs)
+
+        fn = dt.strftime(self.fntempl)
+
+        return f"{self._join_path(subdirs)}/{fn}"
+
 
     def filedown(self,
-                 url:str,
-                 local_root: Optional[str]=None,
-                 xml: Optional[bool]=False):
+                 urls: Union[str, list],
+                 create_subdirs=True,
+                 local_root: Optional[str] = None):
         """
         Download remote netcd file via its URL.
 
         Parameters
         ----------
-        url: str
-            File URL
+        url: str or list
+            File URL(s)
+        create_subdirs: bool, optional (default: True)
+            Create subfolder structure as for the remote dataset and place
+            downloaded file in the respective directory.
         local_root : str, optional (default: None)
             Local directory under which the data is stored.
-        xml: bool, optional (Default: False)
-            Download the according xml file to the netcdf file.
 
         Returns
         -------
@@ -564,13 +633,14 @@ class GldasRemote(DatasetConnection):
         if self.session is None:
             raise ValueError('No username/password found')
 
-        urls = [url]
-        if xml:
-            urls.append(urls[0] + '.xml')
-
         for url in urls:
-            filename = url[url.rfind('/')+1:]
-            path_local = os.path.join(local_root, filename)
+            remote_subdirs = url.replace(self.root, '').split('/')
+            if not create_subdirs:
+                filepath = remote_subdirs[-1]
+            else:
+                filepath = os.path.join(*remote_subdirs)
+
+            path_local = os.path.join(local_root, filepath)
             os.makedirs(os.path.dirname(path_local), exist_ok=True)
             try:
                 response = self.session.get(url, stream=True)
@@ -598,72 +668,43 @@ class GldasRemote(DatasetConnection):
         xml: bool, Optional (default: False)
             Also download the accoring xml file for the nc file.
         """
-        
-        subdirs = [dt.strftime(e) for e in self.subdir_templ]
 
-        if len(subdirs) == 1:
-            subdirs = (subdirs[0], )
-        else:
-            subdirs = tuple(subdirs)
-
-        local_path = os.path.join(local_root, *subdirs)
-        fn = dt.strftime(self.fntempl)
-        url = f"{self._join_path(subdirs)}/{fn}"
-
-        self.filedown(url, local_path, xml)
+        self.filedown(self.url4date(dt), local_path, xml)
 
 
     def dirdown(self,
                 local_root: str,
                 subdirs: Optional[Union[str, tuple]]=None,
-                xml: Optional[bool] = False,
                 recursive: Optional[bool]=True,
-                patterns='*.nc4',
+                patterns=('*.nc4', '*.nc4.xml'),
                 **kwargs):
         """
-        Download all netcdf files in a subdir
+        Download ALL netcdf files in a subdir
 
         Parameters
         ----------
         local_root: str
-            Local path where the downloaded file is stored.
+            Local root path where files are stored (must already exist)
         subdirs: tuple or str, optional (default: None)
             Subdir of a dataset to download, typically something like (2000, 001)
-            If no subdir is passed, the dataset root is used, ie. the whole dataset
-            will be downloaded.
+            If no subdir is passed, the dataset root is used, ie. we look through
+            the whole data set, which can take some time.
         xml: bool, Optional (default: False)
             Also download the accoring xml file for the nc file.
         recursive : bool, Optional (default: True)
             Downloads all netcdf file in the passed subdir recursively.
-        patterns: str or list[str], optional (default: *.nc4)
+        patterns: str or tuple(str), optional (default: ('*.nc4', '*.nc4.xml'))
             Filename patterns of files to download
         """
-        if isinstance(subdirs, str):
-            subdirs = (subdirs, )
-        elif subdirs is None:
-            subdirs = ''
-        else:
-            pass
 
-        if not recursive:
-            folders = tuple()
-        else:
-            folders = self.list_folders(subdirs, pattern=self.subdir_pattern)
+        urls = self.list_files(subdirs,
+                               recursive=recursive,
+                               patterns=patterns,
+                               absolute=True,
+                               **kwargs)
+        self.filedown(urls, create_subdirs=True, local_root=local_root)
 
-        if len(folders) == 0:
-            for ncfile in self.list_files(subdirs,
-                                          patterns=patterns,
-                                          **kwargs):
-                self.filedown(url=f"{self._join_path(subdirs)}/{ncfile}",
-                              local_root=os.path.join(local_root, *subdirs),
-                              xml=xml)
-            return  # end recursion
-        else:
-            for folder in folders:
-                self.dirdown(local_root=local_root,
-                             subdirs=tuple([*subdirs, folder]),
-                             xml=xml,
-                             recursive=True)
+
 
 class GldasLocal(DatasetConnection):
     """
@@ -704,13 +745,43 @@ class GldasLocal(DatasetConnection):
             subdirs = (subdirs, )
         return os.path.join(self.root, *subdirs)
 
+    @staticmethod
+    def _ffilter(path: str,
+                 ignore: Optional[Union[list, str]] = None,
+                 patterns: Optional[Union[str, tuple]] = '*',
+                 type: Optional[Literal['all', 'dir', 'file']] = 'all') \
+            -> np.ndarray:
+        """ Filter function to differentiate between files and folders. """
+        if ignore is None:
+            ignore = []
+        elif isinstance(ignore, str):
+            ignore = [ignore]
+
+        if isinstance(patterns, str):
+            patterns = (patterns,)
+
+        name = os.path.basename(path)
+
+        flags = [name not in ignore,
+                 isinstance(name, str),
+                 np.any([fnmatch.fnmatch(name, p) for p in patterns])]
+
+        if type.lower() == 'all':
+            pass
+        elif type.lower() == 'dir':
+            flags.append(os.path.isdir(path))
+        elif type.lower() == 'file':
+            flags.append(os.path.isfile(path))
+        else:
+            raise NotImplementedError(f"Type not implemented: {type}")
+
+        return np.all(flags)
+
     def _list_content(
             self,
             subdirs: Union[tuple, str] = '',
-            ignore: Optional[list] = None,
-            pattern: Optional[str] = '*',
-            type: Optional[Literal['all', 'dir', 'file']] = 'all',
             absolute: Optional[bool] = False,
+            **filter_kwargs
             ) -> dict:
         """
         List content from local connection.
@@ -718,38 +789,21 @@ class GldasLocal(DatasetConnection):
         Parameters
         ----------
         subdirs : List of subdirs
-        ignore: List of names to ignore
-        pattern : naming pattern to filter files/folders
-        type : 'all', 'dir' or 'file'
+        ignore: List of names to ignore, default None
+        patterns : naming patterns to filter files/folders, default '*' for all files
+        type : 'all', 'dir' or 'file', default 'all'
         absolute : Whether to return only names or full paths
         """
-        if ignore is None:
-            ignore = []
 
-        def __ffilter(path):
-            name = os.path.basename(path)
-            flags = [name not in ignore,
-                     isinstance(name, str),
-                     fnmatch.fnmatch(name, pattern)]
 
-            if type.lower() == 'all':
-                pass
-            elif type.lower() == 'dir':
-                flags.append(os.path.isdir(path))
-            elif type.lower() == 'file':
-                flags.append(os.path.isfile(path))
-            else:
-                raise NotImplementedError(f"Type not implemented: {type}")
-
-            return np.all(flags)
-
-        # get all files and :
-        # folders in subdir
+        # get all files and folders in subdir
         glob_pattern = self._join_path(tuple([*subdirs, '*']))
         paths = np.array([f for f in glob.glob(glob_pattern)])
 
         if len(paths) > 0:
-            flags = np.vectorize(__ffilter)(paths).tolist()
+            flags = np.array([self._ffilter(path=path,
+                                            **filter_kwargs)
+                              for path in paths])
         else:
             flags = slice(None, None, None)
 
@@ -770,8 +824,23 @@ class GldasLocal(DatasetConnection):
 
 
 if __name__ == '__main__':
+    import xarray as xr
 
 
+    remote = GldasRemote('GLDAS_CLSM10_3H_EP.2.1')
+    print(remote)
+    print(remote.session)
+
+    urls = remote.dirdown(local_root="/home/wolfgang/data-write/temp/gldas/",
+                          subdirs=('2021','121'), recursive=True)
+
+    #
+    # store = xr.backends.PydapDataStore.open(urls[0],
+    #                                         session=remote.session)
+    # ds = xr.open_dataset(store)
+    #
+    # xr.open_dataset(urls[0], backend_kwargs=dict(session=remote.session))
+    #
 
     # remote.datedown(datetime(2003,5,3,9), '/home/wolfgang/data-write/temp/gldas/', xml=True)
     # remote.dirdown(subdirs=None, recursive=True, local_root='/home/wolfgang/data-write/temp/gldas/',
@@ -788,7 +857,7 @@ if __name__ == '__main__':
 
 
     # remote.parse_filename()
-    # first, last = remote.get_first_last_item(('2015', '001'), pattern='*.nc4')
+    # first, last = remote.get_first_last_item(('2015', '001'), patterns='*.nc4')
     # folders = remote.list_folders(ignore=('doc',))
     # years = remote.list_subdirs_in_dataset()
     # days = remote.list_subdirs_in_dir(2015)
