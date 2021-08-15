@@ -58,7 +58,7 @@ def test_get_first_gldas_folder_no_folder():
 
 def test_gldas_get_start_end():
     path = os.path.join(
-        os.path.dirname(__file__), "test-data", "GLDAS_NOAH_image_data"
+        os.path.dirname(__file__), "test-data", "GLDAS_NOAH025_3H.2.1"
     )
     version, start, end = gldas_folder_get_version_first_last(path)
     version_should = "GLDAS_Noah_v21_025"

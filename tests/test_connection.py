@@ -75,7 +75,7 @@ class TestLocalConnection(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        rootpath = testdata_path / 'GLDAS_NOAH_image_data'
+        rootpath = testdata_path / 'GLDAS_NOAH025_3H.2.1'
         cls.local = GldasLocal(path=rootpath)
 
     def test_properties(self):

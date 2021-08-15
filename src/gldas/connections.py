@@ -14,7 +14,7 @@ import gldas.const as globals
 import time
 from typing import Callable, Optional, Union, Tuple
 from typing_extensions import Literal
-from warnings import warn
+import warnings
 import requests
 import subprocess
 import getpass
@@ -61,6 +61,20 @@ class SessionWithHeaderRedirection(requests.Session):
                 del headers['Authorization']
 
 
+@dataclass
+class FileWithMeta:
+    """
+    A combination of a netcdf file and a xml file containing metadata for
+    the netcdf file.
+    """
+    nc: str
+    xml: str = None
+
+    def __post_init__(self):
+        if self.xml is None:
+            self.xml = self.nc + '.xml'
+        self.metadata = pd.read_xml(self.xml, xpath='.//DataGranule').loc[0]
+
 def needs_dataset(func: Callable):
     @wraps(func)
     def _impl(self, *args, **kwargs):
@@ -77,6 +91,7 @@ class DatasetConnection:
     """
 
     is_remote: bool
+    metadata: pd.DataFrame = None
 
     @abc.abstractclassmethod
     def _list_content(self,
@@ -85,6 +100,7 @@ class DatasetConnection:
                       patterns: Optional[Union[str, tuple]] = '*',
                       type: Optional[Literal['all', 'dir', 'file']] = 'all',
                       absolute: Optional[bool] = False,
+                      xml_meta=False,
                       ) -> dict:
         """
         Create a collection of files available for a data set.
@@ -104,6 +120,8 @@ class DatasetConnection:
             or only folder names (dir).
         absolute: bool, optional (default: False)
             Whether to return the full path or the file/folder name only.
+        xml_meta: bool, optional (default: False)
+            Include metadata from xml file to contents
 
         Returns
         -------
@@ -130,6 +148,14 @@ class DatasetConnection:
             -> np.ndarray:
         """ Filter function to differentiate between files and folders. """
         pass
+
+    def _load_metadata(self) -> pd.DataFrame:
+        metadata = None
+        if hasattr(self, 'dataset'):
+            name = self.dataset.split('.')[0]
+            metadata = pd.read_xml(self._join_path(f"{name}.xml"),
+                                   xpath='CollectionMetaData').loc[0]  # DataGranule?
+        return metadata
 
     def list_years(self, as_int: Optional[bool]=False) -> list:
         """
@@ -217,10 +243,11 @@ class DatasetConnection:
             Last item in sorted content
         """
 
-        content = sorted(self._list_content(
-            subdirs, ignore=None, patterns=patterns, **kwargs)['Name'])
+        cont = self._list_content(subdirs, ignore=None, patterns=patterns,
+                                  **kwargs)
 
-        return (content[0], content[-1]) if len(content) >= 1 else (None, None)
+        names = sorted(cont['Name'].values)
+        return (names[0], names[-1]) if len(names) >= 1 else (None, None)
 
     def list_files(self,
                    subdirs='',
@@ -258,14 +285,16 @@ class DatasetConnection:
                                       patterns=patterns,
                                       type='file',
                                       **kwargs)
-            files += cont['Name']
+            files += list(cont['Name'].values)
         else:
             for folder in folders:
                 print(folder)
-                files += self.list_files(tuple([*subdirs, folder]),
-                                         recursive=recursive,
-                                         patterns=patterns,
-                                         **kwargs)
+                cont = self.list_files(tuple([*subdirs, folder]),
+                                       recursive=recursive,
+                                       patterns=patterns,
+                                       **kwargs)
+                files += list(cont['Name'].values)
+
         return files
 
     def list_folders(self,
@@ -288,10 +317,12 @@ class DatasetConnection:
 
         subdirs = tuple([str(s) for s in subdirs])
 
-        folders = self._list_content(subdirs,
-                                     patterns=patterns,
-                                     type='dir',
-                                     **kwargs)['Name']
+        cont = self._list_content(subdirs,
+                                  patterns=patterns,
+                                  type='dir',
+                                  **kwargs)
+
+        folders = list(cont['Name'].values)
 
         return folders
 
@@ -433,10 +464,11 @@ class GldasRemote(DatasetConnection):
 
         if dataset is None:
             self.dataset = None  # connect later
+            self.metadata = None
         else:
             # TODO: if user/pwd is none use the env variables, if they are not set, show descriptive error here.
             self.connect(dataset, username, password)  # connect directly
-
+            self.metadata = self._load_metadata()
 
     def __repr__(self) -> str:
         if self.dataset is None:
@@ -534,45 +566,52 @@ class GldasRemote(DatasetConnection):
             self,
             subdirs: Union[tuple, str] = '',
             absolute: Optional[bool]=False,
+            xml_meta: bool = False,
             **filter_kwargs
-            ) -> dict:
+            ) -> pd.DataFrame:
         """
         List content from remote connection.
 
         Parameters
         ----------
-        subdirs : List of subdirs
+        subdirs : tuple or str, optional (default: '')
+            List of subdirs
+        absolute : bool, optional (default: False)
+            Whether to return only names or full paths
+        xml_meta: bool, optional (default: False)
+            Include metadata from xml file to contents (slower)
         ignore: List of names to ignore
         patterns : naming patterns to filter files/folders
         type : 'all', 'dir' or 'file'
-        absolute : Whether to return only names or full paths
         """
-        # try:
-        table = pd.read_html(self._join_path(subdirs))[0]
-        columns = ['Name']
-        columns.append('Last modified')
-        columns.append('Size')
+        table = pd.read_html(self._join_path(subdirs))[0].loc[:, ['Name', 'Last modified']]
+        columns = ['Name', 'Last modified']
 
-        table.dropna(subset=('Name',), inplace=True)
+        table = table.dropna(subset=('Name',))
 
         flags = np.array([self._ffilter(path=path, **filter_kwargs)
                           for path in table['Name'].values])
-        table = table.loc[flags, columns]
-        cont = table.to_dict(orient='list')
-        # except urllib.error.HTTPError:
-        #     cont = {}
+        table = table.loc[flags, columns].reset_index(drop=True)
 
-        names = []
-        for n in cont['Name'].copy():
-            if absolute:
-                n = self._join_path((*subdirs, n))
-            if n.endswith('/'):
-                n = n[:-1]
-            names.append(n)
+        # from xml into the returned data frame
+        metadata_fields_lut = dict(SizeBytes='SizeBytesDataGranule')
+        for k in metadata_fields_lut.keys():
+            table[k] = np.nan
 
-        cont['Name'] = names
+        for i, name in enumerate(table['Name'].values):
+            if name.endswith('/'):
+                name = name[:-1]
 
-        return cont
+            url = self._join_path((*subdirs, name))
+
+            if xml_meta and (url.endswith('.nc4')):
+                f = FileWithMeta(url)
+                for table_key, xml_key in metadata_fields_lut.items():
+                    table.loc[i, table_key] = f.metadata[xml_key]
+
+            table.loc[i, 'Name'] = url if absolute else name
+
+        return table
 
     def list_years(self, as_int: Optional[bool]=False) -> list:
         """
@@ -608,11 +647,12 @@ class GldasRemote(DatasetConnection):
 
         return f"{self._join_path(subdirs)}/{fn}"
 
-
     def filedown(self,
                  urls: Union[str, list],
+                 local_root,
                  create_subdirs=True,
-                 local_root: Optional[str] = None):
+                 max_retries=5,
+                 n_proc=1):
         """
         Download remote netcd file via its URL.
 
@@ -620,18 +660,20 @@ class GldasRemote(DatasetConnection):
         ----------
         url: str or list
             File URL(s)
+        local_root : str
+            Local directory under which the data is stored.
         create_subdirs: bool, optional (default: True)
             Create subfolder structure as for the remote dataset and place
             downloaded file in the respective directory.
-        local_root : str, optional (default: None)
-            Local directory under which the data is stored.
-
-        Returns
-        -------
-
+        max_retries: int, optional (default: 5)
+            Number of potential retries in case a file can not be downloaded.
+        n_proc: int, optional (default: 1)
+            Number of parallel processes to start and download files.
         """
         if self.session is None:
             raise ValueError('No username/password found')
+
+        # todo: add multi process
 
         for url in urls:
             remote_subdirs = url.replace(self.root, '').split('/')
@@ -642,34 +684,44 @@ class GldasRemote(DatasetConnection):
 
             path_local = os.path.join(local_root, filepath)
             os.makedirs(os.path.dirname(path_local), exist_ok=True)
-            try:
-                response = self.session.get(url, stream=True)
-                response.raise_for_status()
-                print(url)
-                with open(path_local, 'wb') as fd:
-                    for chunk in response.iter_content(chunk_size=1024 * 1024):
-                        fd.write(chunk)
-            except requests.exceptions.HTTPError as e:
-                print(e)
+
+            r = 0
+            while r <= max_retries:
+                try:
+                    response = self.session.get(url, stream=True)
+                    response.raise_for_status()
+                    with open(path_local, 'wb') as fd:
+                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            fd.write(chunk)
+                    break
+                except Exception as e:
+                    warnings.warn(f"Error downloading file for URL {url}: {e}")
+                    r += 1
 
     def datedown(self,
                  dt: datetime,
-                 local_root: str,
-                 xml: Optional[bool]=False):
+                 local_root,
+                 **kwargs):
         """
         Download a specific netcdffile for the current dataset by its date
 
         Parameters
         ----------
-        dt: datetime
-            Date time of the file to download if it exists
+        dt: datetime or np.ndarray
+            Date time(s) of the file(s) to download if it exists
         local_root: str
             Local path where the downloaded file is stored.
-        xml: bool, Optional (default: False)
-            Also download the accoring xml file for the nc file.
+        create_subdirs: bool, optional (default: True)
+            Create subfolder structure as for the remote dataset and place
+            downloaded file in the respective directory.
+        local_root : str, optional (default: None)
+            Local directory under which the data is stored.
+        max_retries: int, optional (default: 5)
+            Number of potential retries in case a file can not be downloaded.
         """
-
-        self.filedown(self.url4date(dt), local_path, xml)
+        dt = np.atleast_1d(dt)
+        urls = [self.url4date(d) for d in dt]
+        self.filedown(urls, local_root=local_root, **kwargs)
 
 
     def dirdown(self,
@@ -714,7 +766,8 @@ class GldasLocal(DatasetConnection):
     path: str
 
     def __init__(self,
-                 path:str):
+                 path:str,
+                 dataset=None):
         """
         Connects to a local folder where GLDAS image data is stored in annual
         / doy folders
@@ -724,6 +777,10 @@ class GldasLocal(DatasetConnection):
         path : str
             Local root path to the data directory that contains folders for
             each year.
+        dataset : str
+            Name of the dataset that is stored in path. If None is given
+            it is assumed that the folder name is also the dataset name
+            (should be the case if the name was not changed manually).
         """
 
         if not os.path.exists(path):
@@ -735,6 +792,9 @@ class GldasLocal(DatasetConnection):
 
         self.subdir_pattern, self.subdir_templ, self.fntempl, \
         dttempl, start_date, end_date = self._infos_from_files()
+
+        self.dataset = os.path.basename(self.path) if dataset is None else dataset
+        self.metadata = self._load_metadata()
 
     @property
     def root(self) -> str:
@@ -782,7 +842,7 @@ class GldasLocal(DatasetConnection):
             subdirs: Union[tuple, str] = '',
             absolute: Optional[bool] = False,
             **filter_kwargs
-            ) -> dict:
+            ) -> pd.DataFrame:
         """
         List content from local connection.
 
@@ -795,7 +855,6 @@ class GldasLocal(DatasetConnection):
         absolute : Whether to return only names or full paths
         """
 
-
         # get all files and folders in subdir
         glob_pattern = self._join_path(tuple([*subdirs, '*']))
         paths = np.array([f for f in glob.glob(glob_pattern)])
@@ -807,13 +866,15 @@ class GldasLocal(DatasetConnection):
         else:
             flags = slice(None, None, None)
 
-        cont = {'sizes': [], 'Last modified': [], 'Name': []}
+        cont = {'Name': [], 'Last modified': [], 'SizeBytes': []}
 
         for p in paths[flags]:
             p = Path(p)
             cont['Last modified'].append(datetime.fromtimestamp(p.stat().st_mtime))
-            cont['sizes'].append(os.path.getsize(p))
+            cont['SizeBytes'].append(os.path.getsize(p))
             cont['Name'].append(p.name if not absolute else str(p))
+
+        cont = pd.DataFrame(data=cont)
 
         return cont
 
@@ -826,8 +887,12 @@ class GldasLocal(DatasetConnection):
 if __name__ == '__main__':
     import xarray as xr
 
+    local = GldasLocal("/home/wolfgang/code/gldas/tests/test-data/GLDAS_NOAH025_3H.2.1")
+    local.list_files(recursive=True, absolute=True)
 
     remote = GldasRemote('GLDAS_CLSM10_3H_EP.2.1')
+    remote.list_files(('2005', '001'), absolute=False)
+
     print(remote)
     print(remote.session)
 
@@ -865,7 +930,7 @@ if __name__ == '__main__':
     # files = remote.list_files_for_day(2015, 1, '.nc4')
     #
     #
-    # local = GldasLocal("/home/wolfgang/code/gldas/tests/test-data/GLDAS_NOAH_image_data")
+    # local = GldasLocal("/home/wolfgang/code/gldas/tests/test-data/GLDAS_NOAH025_3H.2.1")
     # first, last = local.get_first_last_item(('2015', '001'))
     # folders = local.list_folders(ignore=('doc',))
     # years = local.list_subdirs_in_dataset()

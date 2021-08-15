@@ -11,7 +11,7 @@ def test_GLDAS_Noah_v1_025Ds_img_reading():
     parameter = ["086_L2", "086_L1", "085_L1", "138", "132", "051"]
     img = GLDAS_Noah_v1_025Ds(
         data_path=os.path.join(
-            os.path.dirname(__file__), "test-data", "GLDAS_NOAH_image_data"
+            os.path.dirname(__file__), "test-data", "GLDAS_NOAH025_3H.2.1"
         ),
         parameter=parameter,
         subgrid=None,
@@ -47,7 +47,7 @@ def test_GLDAS_Noah_v21_025Ds_img_reading():
     ]
     img = GLDAS_Noah_v21_025Ds(
         data_path=os.path.join(
-            os.path.dirname(__file__), "test-data", "GLDAS_NOAH_image_data"
+            os.path.dirname(__file__), "test-data", "GLDAS_NOAH025_3H.2.1"
         ),
         parameter=parameter,
         subgrid=None,
@@ -86,7 +86,7 @@ def test_GLDAS_Noah_v21_025Ds_img_reading_landpoints():
 
     img = GLDAS_Noah_v21_025Ds(
         data_path=os.path.join(
-            os.path.dirname(__file__), "test-data", "GLDAS_NOAH_image_data"
+            os.path.dirname(__file__), "test-data", "GLDAS_NOAH025_3H.2.1"
         ),
         parameter=parameter,
         subgrid=landgrid,
@@ -120,7 +120,7 @@ def test_GLDAS_Noah_v1_025Ds_timestamps_for_daterange():
     parameter = ["086_L2", "086_L1", "085_L1", "138", "132", "051"]
     img = GLDAS_Noah_v1_025Ds(
         data_path=os.path.join(
-            os.path.dirname(__file__), "test-data", "GLDAS_NOAH_image_data"
+            os.path.dirname(__file__), "test-data", "GLDAS_NOAH025_3H.2.1"
         ),
         parameter=parameter,
         subgrid=None,
@@ -154,7 +154,7 @@ def test_GLDAS_Noah_v21_025Ds_timestamps_for_daterange():
     ]
     img = GLDAS_Noah_v21_025Ds(
         data_path=os.path.join(
-            os.path.dirname(__file__), "test-data", "GLDAS_NOAH_image_data"
+            os.path.dirname(__file__), "test-data", "GLDAS_NOAH025_3H.2.1"
         ),
         parameter=parameter,
         subgrid=None,
@@ -184,7 +184,7 @@ def test_GLDAS_Noah_v1_025Img_img_reading_1D():
         os.path.join(
             os.path.dirname(__file__),
             "test-data",
-            "GLDAS_NOAH_image_data",
+            "GLDAS_NOAH025_3H.2.1",
             "2015",
             "001",
             "GLDAS_NOAH025SUBP_3H.A2015001.0000.001.2015037193230.grb",
@@ -219,7 +219,7 @@ def test_GLDAS_Noah_v21_025Img_img_reading_1D():
         os.path.join(
             os.path.dirname(__file__),
             "test-data",
-            "GLDAS_NOAH_image_data",
+            "GLDAS_NOAH025_3H.2.1",
             "2015",
             "001",
             "GLDAS_NOAH025_3H.A20150101.0000.021.nc4",
@@ -251,7 +251,7 @@ def test_GLDAS_Noah_v1_025Img_img_reading_2D():
         os.path.join(
             os.path.dirname(__file__),
             "test-data",
-            "GLDAS_NOAH_image_data",
+            "GLDAS_NOAH025_3H.2.1",
             "2015",
             "001",
             "GLDAS_NOAH025SUBP_3H.A2015001.0000.001.2015037193230.grb",
@@ -288,7 +288,7 @@ def test_GLDAS_Noah_v21_025Img_img_reading_2D():
         os.path.join(
             os.path.dirname(__file__),
             "test-data",
-            "GLDAS_NOAH_image_data",
+            "GLDAS_NOAH025_3H.2.1",
             "2015",
             "001",
             "GLDAS_NOAH025_3H.A20150101.0000.021.nc4",
