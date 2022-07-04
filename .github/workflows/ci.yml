@@ -49,6 +49,9 @@ jobs:
           filename=env_py${{ matrix.python-version }}_${{ matrix.os }}.yml
           conda env export --no-builds | grep -v "prefix" > .artifacts/$filename
       - name: Install package and test
+        env:
+          GES_DISC_USERNAME: ${{ matrix.GES_DISC_USERNAME }}
+          GES_DISC_PWD: ${{ matrix.GES_DISC_PWD }}
         shell: bash -l {0}
         run: |
           pip install -e .
@@ -60,7 +63,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COVERALLS_FLAG_NAME: ${{ matrix.python-version }}
-          COVERALLS_PARALLEL: true
       - name: Create wheel and dist package
         shell: bash -l {0}
         run: |
