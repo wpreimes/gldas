@@ -33,7 +33,7 @@ class TestDownload(unittest.TestCase):
         args = [self.outpath, '-s', '2010-03-02', '-e' '2010-03-02', '--product', "GLDAS_Noah_v21_025",
                '--username', username, '--password', pwd]
         main_download(args)
-        assert len(os.listdir(os.path.join(self.outpath, '2010', '061'))) == 8 * 2 + 2
+        assert len(os.listdir(os.path.join(self.outpath, '2010', '061'))) == 8 * 2 + 1
 
         ds = GLDAS_Noah_v21_025Ds(self.outpath)
         img = ds.read(datetime(2010, 3, 2, 3))
