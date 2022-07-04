@@ -50,8 +50,8 @@ jobs:
           conda env export --no-builds | grep -v "prefix" > .artifacts/$filename
       - name: Install package and test
         env:
-          GES_DISC_USERNAME: ${{ matrix.GES_DISC_USERNAME }}
-          GES_DISC_PWD: ${{ matrix.GES_DISC_PWD }}
+          GES_DISC_USERNAME: ${{ secrets.GES_DISC_USERNAME }}
+          GES_DISC_PWD: ${{ secrets.GES_DISC_PWD }}
         shell: bash -l {0}
         run: |
           pip install -e .
