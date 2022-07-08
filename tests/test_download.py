@@ -16,6 +16,8 @@ from gldas.download import main as main_download
 
 from gldas.interface import GLDAS_Noah_v21_025Ds
 
+os.environ['GES_DISC_USERNAME'] = 'wpreimes'
+os.environ['GES_DISC_PWD'] = 'ThisTestPWD1'
 try:
     username = os.environ['GES_DISC_USERNAME']
     pwd = os.environ['GES_DISC_PWD']
@@ -33,7 +35,7 @@ class TestDownload(unittest.TestCase):
         args = [self.outpath, '-s', '2010-03-02', '-e' '2010-03-02', '--product', "GLDAS_Noah_v21_025",
                '--username', username, '--password', pwd]
         main_download(args)
-        assert len(os.listdir(os.path.join(self.outpath, '2010', '061'))) == 8 * 2 + 1
+        assert len([f for f in os.listdir(os.path.join(self.outpath, '2010', '061')) if '.nc4' in f]) == 8 * 2
 
         ds = GLDAS_Noah_v21_025Ds(self.outpath)
         img = ds.read(datetime(2010, 3, 2, 3))

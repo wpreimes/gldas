@@ -15,7 +15,48 @@ from datedown.dates import daily
 from datedown.urlcreator import create_dt_url
 from datedown.fname_creator import create_dt_fpath
 from datedown.interface import download_by_dt
-from datedown.down import download
+from datedown.wget import map_download
+from multiprocessing import Pool
+import tempfile
+
+def download(urls, targets, num_proc=1, username=None, password=None,
+             recursive=False, filetypes=None, cookie_file=None):
+    """
+    Download the urls and store them at the target filenames.
+
+    Parameters
+    ----------
+    urls: iterable
+        iterable over url strings
+    targets: iterable
+        paths where to store the files
+    num_proc: int, optional
+        Number of parallel downloads to start
+    username: string, optional
+        Username to use for login
+    password: string, optional
+        Password to use for login
+    recursive: boolean, optional
+        If set then no exact filenames can be given.
+        The data will then be downloaded recursively and stored in the target folder.
+    filetypes: list, optional
+        list of file extension to download, any others will no be downloaded
+    """
+
+    dlfunc = partial(map_download,
+                     username=username,
+                     password=password,
+                     cookie_file=cookie_file.name,
+                     recursive=recursive,
+                     filetypes=filetypes)
+
+    if num_proc == 1:
+        for url_target in zip(urls, targets):
+            dlfunc(url_target)
+    else:
+        p = Pool(num_proc)
+        # partial function for Pool.map
+        p.map_async(dlfunc, zip(urls, targets)).get(timeout=10)
 
 
 def gldas_folder_get_version_first_last(
@@ -360,6 +401,8 @@ def main(args):
         subdirs=args.localsubdirs,
     )
 
+    cookie_file = tempfile.NamedTemporaryFile()
+
     down_func = partial(
         download,
         num_proc=args.n_proc,
@@ -367,11 +410,13 @@ def main(args):
         password="'" + args.password + "'",
         recursive=True,
         filetypes=["nc4", "nc4.xml"],
+        cookie_file=cookie_file
     )
+
     download_by_dt(
         dts, url_create_fn, fname_create_fn, down_func, recursive=True
     )
-
+    cookie_file.close()
 
 def run():
     main(sys.argv[1:])

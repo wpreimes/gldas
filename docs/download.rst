@@ -8,6 +8,10 @@ After that you can use the command line program ``gldas_download`` together with
 
 For example to download all GLDAS Noah v2.1 Images (3-hourly)
 
+Windows: It is required that the `wget` command is available. Consider running ``conda install -c menpo wget``
+to install a version of it.
+
+
 .. code::
 
    gldas_download /tmp -s 2018-06-03 -e 2018-06-05 --product GLDAS_Noah_v21_025 --username **USERNAME** --password **PASSWORD**
@@ -16,6 +20,6 @@ would download GLDAS Noah version 2.1 data from the select start to the selected
 
 For a description of the download function and all options run
 
-..code::
+.. code::
 
  gldas_download -h
